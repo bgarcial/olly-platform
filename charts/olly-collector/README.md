@@ -5,34 +5,81 @@ This chart contains agents that scrape and collect telemetry (logs, metrics, tra
 
 # Prerequisites
 
-1. cert-manager (Required)
+1. cert-manager (Required) - <https://cert-manager.io/docs/installation/helm/#installing-from-the-oci-registry>
 
 The operator uses admission webhooks that require cert-manager:
 
 ```
-# Add jetstack repo
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-
-# Install cert-manager with CRDs
-helm install cert-manager jetstack/cert-manager \
---namespace cert-manager \
---create-namespace \
---set crds.enabled=true
-
-Verify cert-manager is ready:
-kubectl get pods -n cert-manager
-# Wait for all pods to be Running
+helm install \
+  cert-manager oci://quay.io/jetstack/charts/cert-manager \
+  --version v1.19.2 \
+  --namespace cert-manager \
+  --create-namespace \
+  --set crds.enabled=true
 ```
 
-2. Installing OpenTelemetry Operator
+2. Install Kyverno - <https://kyverno.io/docs/installation/methods/#high-availability-installation>
 
-Add the Helm Repository
+- Add the helm chart repository
 
-```
-helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+```sh
+helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
 ```
+
+- High Availability Installation
+
+```sh
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace \
+--set admissionController.replicas=3 \
+--set backgroundController.replicas=2 \
+--set cleanupController.replicas=2 \
+--set reportsController.replicas=2
+```
+
+When trying to deploy the Instrumentation resource through the kyverno policy I got this issue
+
+```sh
+ helm upgrade olly-collector . \
+--namespace olly-collector   
+level=WARN msg="upgrade failed" name=olly-collector error="failed to create resource: admission webhook \"validate-policy.kyverno.svc\" denied the request: path: spec.rules[0].generate..: system:serviceaccount:kyverno:kyverno-admission-controller requires permissions list,get for resource opentelemetry.io/v1alpha1/Instrumentation in namespace {{ request.object.metadata.name }}"
+Error: UPGRADE FAILED: failed to create resource: admission webhook "validate-policy.kyverno.svc" denied the request: path: spec.rules[0].generate..: system:serviceaccount:kyverno:kyverno-admission-controller requires permissions list,get for resource opentelemetry.io/v1alpha1/Instrumentation in namespace {{ request.object.metadata.name }
+```
+
+This is happening because Kyverno admission controller service account need to get to know about the `Instrumentation` Resource and need to get granted access to that CRD, otherwise when the cluster policy tries to generate the Instrumentation resource  kyverno says it does not have permissions
+
+The cleanest way is to add those permissions via the kyverno helm chart itself
+<https://github.com/kyverno/kyverno/blob/main/charts/kyverno/templates/admission-controller/clusterrole.yaml>
+<https://github.com/kyverno/kyverno/blob/main/charts/kyverno/values.yaml#L797-L858>
+
+- I created a values.yaml file to override that clusterrole definition on the upstream helm chart
+
+```sh
+ helm upgrade --install kyverno kyverno/kyverno \
+  --namespace kyverno --create-namespace \
+  -f infrastructure/kyverno/values.yaml
+Release "kyverno" has been upgraded. Happy Helming!
+NAME: kyverno
+LAST DEPLOYED: Mon Jan 26 23:43:24 2026
+NAMESPACE: kyverno
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+NOTES:
+Chart version: 3.6.2
+Kyverno version: v1.16.2
+
+Thank you for installing kyverno! Your release is named kyverno.
+
+The following components have been installed in your cluster:
+- CRDs
+- Admission controller
+- Reports controller
+- Cleanup controller
+- Background controller
+```
+
+
 
 # Agents
 

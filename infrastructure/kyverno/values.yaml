@@ -1,0 +1,43 @@
+admissionController:
+  replicas: 3
+  rbac:
+    create: true  # Explicit, though it's the default
+    clusterRole:
+      extraResources:
+        - apiGroups:
+            - opentelemetry.io
+          resources:
+            - instrumentations
+          verbs:
+            - create
+            - delete
+            - get
+            - list
+            - patch
+            - update
+            - watch
+
+backgroundController:
+  replicas: 2
+  rbac:
+    create: true
+    clusterRole:
+      extraResources:
+        - apiGroups:
+            - opentelemetry.io
+          resources:
+            - instrumentations
+          verbs:
+            - create
+            - delete
+            - get
+            - list
+            - patch
+            - update
+            - watch
+
+cleanupController:
+  replicas: 2
+
+reportsController:
+  replicas: 2

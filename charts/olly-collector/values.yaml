@@ -27,7 +27,7 @@ opentelemetryCollector:
   instrumentation:
     # Deploy cluster policy to inject Instrumentation resources
     # Deploy Kyverno and then add the cluster policy to inject Instrumentation resources over all namespaces
-    enabled: false
+    enabled: true
     # The namespaces where to enable autoinstrumentation. Defaults to all namespaces
     namespaces: []
   resources:

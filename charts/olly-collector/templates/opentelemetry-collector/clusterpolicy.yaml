@@ -1,0 +1,136 @@
+{{- if and .Values.opentelemetryCollector.enabled .Values.opentelemetryCollector.instrumentation.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ include "olly-collector.fullname" . }}
+  labels:
+    {{- include "olly-collector.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Sync OTel Instrumentation
+    policies.kyverno.io/category: Monitoring
+    policies.kyverno.io/subject: Instrumentation
+    policies.kyverno.io/minversion: 1.16.2
+    policies.kyverno.io/description: >-
+      Olly Collector Instrumentation must exists in multiple Namespaces so Pods
+      can be injected with monitoring SDK libraries. Manually duplicating those Instrumentations
+      is time consuming and error prone. This policy will generate new Instrumentation resources 
+      in all existing namespaces when the policy is applied and when they are created. It will also
+      push updates to the copied Instrumentation should the source Instrumentation be changed.
+spec:
+  generateExisting: true
+  rules:
+  - name: sync-instrumentation
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - Namespace
+          {{- with .Values.opentelemetryCollector.instrumentation.namespaces }}
+          names:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+    exclude:
+      any:
+      - resources:
+          namespaces:
+            - default
+            - kube-system
+            - kube-node-lease
+            - kube-public
+    generate:
+      synchronize: true
+      apiVersion: opentelemetry.io/v1alpha1
+      kind: Instrumentation
+      name: {{ include "olly-collector.fullname" . }}
+      namespace: {{ print "{{ request.object.metadata.name }}" | quote }}
+      data:
+        spec:
+          exporter:
+            endpoint: http://{{ include "olly-collector.name" . }}-opentelemetry-collector.{{ .Release.Namespace }}.svc.cluster.local.:4318
+          env:
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            - name: OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION
+              value: base2_exponential_bucket_histogram
+          propagators:
+            - tracecontext
+            - baggage
+          sampler:
+            type: always_on
+          java:
+            image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:2.21.0
+          nodejs:
+            env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://{{ include "olly-collector.name" . }}-opentelemetry-collector.{{ .Release.Namespace }}.svc.cluster.local.:4317
+          nginx:
+            env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://{{ include "olly-collector.name" . }}-opentelemetry-collector.{{ .Release.Namespace }}.svc.cluster.local.:4317
+          apacheHttpd:
+            env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://{{ include "olly-collector.name" . }}-opentelemetry-collector.{{ .Release.Namespace }}.svc.cluster.local.:4317
+          python:
+            # Required to be explictly set for python
+            env:
+              - name: OTEL_METRICS_EXPORTER
+                value: none
+  - name: sync-instrumentation-full
+    skipBackgroundRequests: true
+    match:
+      any:
+      - resources:
+          kinds:
+            - Namespace
+          {{- with .Values.opentelemetryCollector.instrumentation.namespaces }}
+          names:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+    exclude:
+      any:
+      - resources:
+          namespaces:
+            - default
+            - kube-system
+            - kube-node-lease
+            - kube-public
+    generate:
+      synchronize: true
+      apiVersion: opentelemetry.io/v1alpha1
+      kind: Instrumentation
+      name: {{ include "olly-collector.fullname" . }}-full
+      namespace: {{ print "{{ request.object.metadata.name }}" | quote }}
+      data:
+        spec:
+          exporter:
+            endpoint: http://{{ include "olly-collector.name" . }}-opentelemetry-collector.{{ .Release.Namespace }}.svc.cluster.local.:4318
+          env:
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+            - name: OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION
+              value: base2_exponential_bucket_histogram
+          propagators:
+            - tracecontext
+            - baggage
+          sampler:
+            type: always_on
+          java:
+            # renovate: datasource=docker depName=autoinstrumentation-java registryUrl=https://ghcr.io/open-telemetry/opentelemetry-operator
+            image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:2.21.0
+          nodejs:
+            env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://{{ include "olly-collector.name" . }}-opentelemetry-collector.{{ .Release.Namespace }}.svc.cluster.local.:4317
+          nginx:
+            env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://{{ include "olly-collector.name" . }}-opentelemetry-collector.{{ .Release.Namespace }}.svc.cluster.local.:4317
+          apacheHttpd:
+            env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://{{ include "olly-collector.name" . }}-opentelemetry-collector.{{ .Release.Namespace }}.svc.cluster.local.:4317
+{{- end }}
