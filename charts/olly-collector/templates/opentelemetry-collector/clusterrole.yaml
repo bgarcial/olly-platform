@@ -1,0 +1,19 @@
+{{ if .Values.opentelemetryCollector.enabled -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-opentelemetry-collector
+  labels:
+    {{- include "olly-collector.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ''
+      - apps
+      - batch
+    resources:
+      - '*'
+    verbs:
+      - get
+      - watch
+      - list
+{{ end }}

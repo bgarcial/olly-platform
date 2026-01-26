@@ -1,0 +1,15 @@
+---
+# Follow this schema - https://www.schemastore.org/chart.json - 
+# TBD - check this https://helm.sh/docs/topics/charts/#the-chartyaml-file 
+apiVersion: v2
+name: olly-collector
+description: The olly collectors Helm chart
+type: application
+version: 0.0.1
+appVersion: 0.0.1
+
+dependencies:
+  - name: opentelemetry-operator
+    condition: opentelemetry-operator.enabled
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+    version: 0.99.0

@@ -1,0 +1,24 @@
+# This is an example values.yaml for most common use-cases
+# Here we send all telemetry to the Olly environment
+# An up-to-date list of endpoints can be found here:
+#
+# https://confluence-aholddelhaize.atlassian.net/l/cp/d0dAmVuQ
+#
+# The following components are enabled:
+#
+#
+# - opentelemetry-operator
+# - opentelemetry-collector
+
+global:
+  # cluster: stp-str-tst
+  cluster: xyz-undefined-tst
+
+  opentelemetry:
+    endpoint: https://otlp-http-<personal.olly.nonprd.<mydomain>:443
+
+opentelemetry-operator:
+  enabled: true
+
+opentelemetryCollector:
+  enabled: true

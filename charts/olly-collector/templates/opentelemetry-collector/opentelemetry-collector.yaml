@@ -1,0 +1,27 @@
+{{ if .Values.opentelemetryCollector.enabled }}
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: {{ include "olly-collector.name" . }}-opentelemetry
+  labels: {{ include "olly-collector.labels" . | nindent 4 }}
+spec:
+  mode: daemonset
+  image: {{ .Values.opentelemetryCollector.image }}
+  serviceAccount: {{ include "olly-collector.name" . }}-opentelemetry-collector
+  resources:
+    limits:
+      memory: {{ .Values.opentelemetryCollector.resources.limits.memory }}
+    requests:
+      cpu: {{ .Values.opentelemetryCollector.resources.requests.cpu }}
+      memory: {{ .Values.opentelemetryCollector.resources.requests.memory }}
+  tolerations:
+    - operator: Exists
+  priorityClassName: system-node-critical
+  env:
+    - name: KUBE_NODE_NAME
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: spec.nodeName
+  config: {{ tpl (toYaml .Values.opentelemetryCollector.config) . | nindent 4 }}
+{{ end }}

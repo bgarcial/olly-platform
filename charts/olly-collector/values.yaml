@@ -1,0 +1,235 @@
+global:
+  # The name of the cluster
+  # Must uniquely identify the Kubernetes cluster
+  #
+  # For example:
+  # cluster: stp-str-tst
+  cluster: olly-personal-nonprd
+
+  opentelemetry:
+    # The OpenTelemetry endpoint to send opentelemetry logs, traces and metrics to
+    # An up-to-date list of OpenTelemetry endpoints can be found here:
+    #
+    # For example:
+    # endpoint: https://otlp-http-<personal.olly.nonprd.<mydomain>:443
+    endpoint: ""
+
+opentelemetryCollector:
+  enabled: true
+  image: otel/opentelemetry-collector-k8s:0.133.0
+
+  # Deploy Vertical Pod Autoscaler first
+  # https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler 
+  vpa:
+    enabled: true
+  # Automatic instrumentation of client libraries
+  # Ref: https://opentelemetry.io/docs/kubernetes/operator/automatic/
+  instrumentation:
+    # Deploy cluster policy to inject Instrumentation resources
+    # Deploy Kyverno and then add the cluster policy to inject Instrumentation resources over all namespaces
+    enabled: false
+    # The namespaces where to enable autoinstrumentation. Defaults to all namespaces
+    namespaces: []
+  resources:
+    limits:
+      memory: 500Mi
+    requests:
+      cpu: 250m
+      memory: 500Mi
+  serviceMonitor:
+    labels:
+      prometheus: main-prometheus
+  # processors.filter/drop_noisy_trace_urls: Original from: https://nais.io/blog/posts/otel-from-0-to-100/
+  # processors.k8sattributes: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/processor/k8sattributesprocessor/README.md
+  # processors.memory_limiter: https://github.com/open-telemetry/opentelemetry-collector/blob/main/processor/memorylimiterprocessor/README.md
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    exporters:
+      # Use debug for testing as I don't have an otlp endpoint yet.
+      # https://github.com/open-telemetry/opentelemetry-collector/blob/main/exporter/debugexporter/README.md#getting-started
+      debug:
+        verbosity: detailed
+        sampling_initial: 5
+        sampling_thereafter: 200
+        
+      # otlphttp:
+      #   endpoint: "{{ .Values.global.opentelemetry.endpoint }}"
+    extensions:
+      health_check:
+        endpoint: "0.0.0.0:13133"
+    processors:
+      batch: {}
+      filter/drop_noisy_trace_urls:
+        error_mode: ignore
+        traces:
+          span:
+            # https://jira-eu-aholddelhaize.atlassian.net/browse/DSO-6528
+            - IsMatch(name, "graphql.resolve .+\\.\\d.+")
+            - |
+              (attributes["http.method"] == "GET" or attributes["http.request.method"] == "GET") and (
+                    attributes["http.route"] == "/favicon.ico"               or attributes["http.target"] == "/favicon.ico"                 or attributes["url.path"] == "/favicon.ico"
+                or IsMatch(attributes["http.route"], ".*[iI]s_?[rR]eady")    or IsMatch(attributes["http.target"], ".*[iI]s_?[rR]eady")     or IsMatch(attributes["url.path"], ".*[iI]s[rR]eady")
+                or IsMatch(attributes["http.route"], ".*[iI]s_?[aA]live")    or IsMatch(attributes["http.target"], ".*[iI]s_?[aA]live")     or IsMatch(attributes["url.path"], ".*[iI]s[aA]live")
+                or IsMatch(attributes["http.route"], ".*prometheus")         or IsMatch(attributes["http.target"], ".*prometheus")          or IsMatch(attributes["url.path"], ".*prometheus")
+                or IsMatch(attributes["http.route"], ".*metrics")            or IsMatch(attributes["http.target"], ".*metrics")             or IsMatch(attributes["url.path"], ".*metrics")
+                or IsMatch(attributes["http.route"], ".*actuator.*")         or IsMatch(attributes["http.target"], ".*actuator.*")          or IsMatch(attributes["url.path"], ".*actuator.*")
+                or IsMatch(attributes["http.route"], ".*internal/health.*")  or IsMatch(attributes["http.target"], ".*internal/health.*")   or IsMatch(attributes["url.path"], ".*internal/health.*")
+                or IsMatch(attributes["http.route"], ".*internal/status.*")  or IsMatch(attributes["http.target"], ".*internal/status.*")   or IsMatch(attributes["url.path"], ".*internal/status.*")
+                or IsMatch(attributes["http.route"], ".*/readyz?")           or IsMatch(attributes["http.target"], ".*/readyz?")            or IsMatch(attributes["url.path"], ".*/readyz?")
+                or IsMatch(attributes["http.route"], ".*/healthz?")          or IsMatch(attributes["http.target"], ".*/healthz?")           or IsMatch(attributes["url.path"], ".*/healthz?")
+              )
+      k8sattributes:
+        extract:
+          metadata:
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.deployment.name
+            - k8s.namespace.name
+            - k8s.node.name
+            - k8s.pod.start_time
+            - k8s.statefulset.name
+            - k8s.cronjob.name
+            - k8s.daemonset.name
+            - k8s.job.name
+            - k8s.container.name
+        filter:
+          node_from_env_var: KUBE_NODE_NAME
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.ip
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: connection
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      resource:
+        attributes:
+          - action: insert
+            key: k8s.cluster.name
+            value: "{{ .Values.global.cluster }}"
+    service:
+      telemetry:
+        logs:
+          encoding: json
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: '0.0.0.0'
+                    port: 8888
+      extensions:
+        - health_check
+      pipelines:
+        metrics:
+          exporters:
+            - debug 
+            # - otlphttp
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - batch
+            - resource
+          receivers:
+            - otlp
+        traces:
+          exporters:
+            - debug 
+            # - otlphttp
+          processors:
+            - memory_limiter
+            - filter/drop_noisy_trace_urls
+            - k8sattributes
+            - batch
+            - resource
+          receivers:
+            - otlp
+
+opentelemetry-operator:
+  enabled: false
+  fullnameOverride: opentelemetry-operator
+
+  replicaCount: 2
+
+  pdb:
+    create: true
+    minAvailable: ""
+    maxUnavailable: 1
+
+  ## Provide OpenTelemetry Operator manager container image and resources.
+  manager:
+    # Enable manager pod automatically rolling
+    rolling: true
+
+    # https://github.com/open-telemetry/opentelemetry-helm-charts/blob/main/charts/opentelemetry-operator/UPGRADING.md#0553-to-0560
+    collectorImage:
+      repository: otel/opentelemetry-collector-k8s
+
+    autoInstrumentation:
+      go:
+        enabled: true
+
+    featureGates: ""
+    extraArgs:
+      - --enable-multi-instrumentation
+      - --enable-nginx-instrumentation=true
+
+    resources:
+      limits:
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+    # Deploy Vertical Pod Autoscaler first
+    # https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler 
+    verticalPodAutoscaler:
+      enabled: true
+      # https://github.com/open-telemetry/opentelemetry-operator/issues/2667
+      # Operator needed more resources to solve the above issue.
+      minAllowed:
+        cpu: 500m
+        memory: 2Gi
+      updatePolicy:
+        minReplicas: 1
+        updateMode: Auto
+
+    # TBD - Deploy Prometheus Operator to get the ServiceMonitor CRD
+    serviceMonitor:
+      enabled: false
+
+  ## Admission webhooks make sure only requests with correctly formatted rules will get into the Operator.
+  ## They also enable the sidecar injection for OpenTelemetryCollector and Instrumentation CR's
+  ## Deploy Cert Manager first - https://cert-manager.io/docs/installation/helm/#installing-from-the-oci-registry
+  admissionWebhooks:
+    certManager:
+      enabled: true
+
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-operator
+              app.kubernetes.io/component: controller-manager
+          topologyKey: kubernetes.io/hostname
+
+  tolerations:
+    - effect: NoSchedule
+      key: kubernetes.azure.com/scalesetpriority
+      operator: Equal
+      value: spot
+    - effect: NoSchedule
+      key: CriticalAddonsOnly
+      operator: Exists

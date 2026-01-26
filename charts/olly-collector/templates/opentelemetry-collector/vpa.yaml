@@ -1,0 +1,26 @@
+{{- if and (.Capabilities.APIVersions.Has "autoscaling.k8s.io/v1") (.Values.opentelemetryCollector.vpa.enabled) }}
+# https://github.com/open-telemetry/opentelemetry-operator/pull/2665 when this fix is released we can enable the VPA
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "olly-collector.name" . }}-opentelemetry
+  labels:
+    {{- include "olly-collector.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    apiVersion: opentelemetry.io/v1beta1
+    kind: OpenTelemetryCollector
+    name: {{ include "olly-collector.name" . }}-opentelemetry
+  updatePolicy:
+    minReplicas: 1
+    updateMode: Auto
+  resourcePolicy:
+    containerPolicies:
+      - containerName: otc-container
+        minAllowed:
+          memory: 200Mi
+        maxAllowed:
+          cpu: 2
+          memory: 4Gi
+{{ end -}}
