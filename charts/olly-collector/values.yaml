@@ -6,10 +6,16 @@ global:
   # cluster: stp-str-tst
   cluster: olly-personal-nonprd
 
+  promtail:
+    # The Olly Loki endpoint to send logs to
+    # TBD - Make and up-to-date list of Loki endpoints can be found here:
+    # For example: https://loki.example.com:443/loki/api/v1/push
+    # endpoint: https://loki-personal.olly.nonprd.<mydomain>:443/loki/api/v1/push
+    endpoint: "http://loki-not-configured:3100/loki/api/v1/push"
+
   opentelemetry:
     # The OpenTelemetry endpoint to send opentelemetry logs, traces and metrics to
-    # An up-to-date list of OpenTelemetry endpoints can be found here:
-    #
+    # TBD - Make and up-to-date list of OpenTelemetry endpoints
     # For example:
     # endpoint: https://otlp-http-<personal.olly.nonprd.<mydomain>:443
     endpoint: ""
@@ -69,8 +75,11 @@ opentelemetryCollector:
         error_mode: ignore
         traces:
           span:
-            # https://jira-eu-aholddelhaize.atlassian.net/browse/DSO-6528
-            - IsMatch(name, "graphql.resolve .+\\.\\d.+")
+            # Drop spans for metric/health endpoints
+            # Called by Kubernetes (readiness/liveness probes)
+            # Prometheus scrapping metrics
+            # Spring Boot Application Internal health checks - actuator
+            # Load Balancers and Ingress Controllers 
             - |
               (attributes["http.method"] == "GET" or attributes["http.request.method"] == "GET") and (
                     attributes["http.route"] == "/favicon.ico"               or attributes["http.target"] == "/favicon.ico"                 or attributes["url.path"] == "/favicon.ico"
@@ -225,11 +234,66 @@ opentelemetry-operator:
               app.kubernetes.io/component: controller-manager
           topologyKey: kubernetes.io/hostname
 
+  # Think about toleration if I happen to have taints or add them
+  tolerations: []
+
+promtail:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: grafana/promtail
+  daemonset:
+    enabled: true
+  
+  resources:
+    limits: null
+    requests:
+      cpu: 100m
+      memory: 100Mi
+  
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 100%
+  
+  priorityClassName: system-node-critical
+
+
+  # Run on all nodes including tainted ones
   tolerations:
-    - effect: NoSchedule
-      key: kubernetes.azure.com/scalesetpriority
-      operator: Equal
-      value: spot
-    - effect: NoSchedule
-      key: CriticalAddonsOnly
-      operator: Exists
+    - operator: Exists
+
+   # Host paths for reading container logs
+  defaultVolumes:
+    - name: run
+      hostPath:
+        path: /run/promtail/olly-collector
+    - name: containers
+      hostPath:
+        path: /var/lib/docker/containers
+    - name: pods
+      hostPath:
+        path: /var/log/pods
+
+  config:
+    clients:
+      - url: "{{ .Values.global.promtail.endpoint }}"
+        external_labels:
+          cluster: "{{ .Values.global.cluster }}"
+
+    snippets:
+      extraRelabelConfigs:
+        # Instance label fallback for older Helm charts
+        - source_labels:
+            - __meta_kubernetes_pod_label_app_kubernetes_io_instance
+            - __meta_kubernetes_pod_label_instance
+            - __meta_kubernetes_pod_label_release
+          regex: ^;*([^;]+)(;.*)?$
+          action: replace
+          target_label: instance
+
+      pipelineStages:
+        - cri: {}
+        - labeldrop:
+            # Remove high-cardinality path label
+            - filename  
