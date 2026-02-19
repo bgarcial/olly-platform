@@ -1,0 +1,30 @@
+opentelemetry-collector:
+  enabled: false
+jaeger:
+  enabled: false
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+opensearch:
+  enabled: false
+
+default:
+  env:
+    - name: OTEL_SERVICE_NAME
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.labels['app.kubernetes.io/component']
+    - name: OTEL_COLLECTOR_NAME
+      value: "olly-collector-opentelemetry-collector.olly-collector.svc.cluster.local"
+    - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+      value: cumulative
+    - name: OTEL_RESOURCE_ATTRIBUTES
+      value: "service.namespace=opentelemetry-demo"
+
+components:
+  fraud-detection:
+    resources:
+      limits:
+        memory: 512Mi
