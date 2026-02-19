@@ -22,7 +22,7 @@ global:
 
 opentelemetryCollector:
   enabled: true
-  image: otel/opentelemetry-collector-k8s:0.133.0
+  image: otel/opentelemetry-collector-k8s:0.134.1
 
   # Deploy Vertical Pod Autoscaler first
   # https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler 
