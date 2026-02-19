@@ -16,7 +16,7 @@ global:
   opentelemetry:
     # The OpenTelemetry endpoint to send opentelemetry logs, traces and metrics to
     # TBD - Make and up-to-date list of OpenTelemetry endpoints
-    # For example:
+    # For example when it comes to htttps in the case the endpoint is being exposed through an Ingress with TLS termination
     # endpoint: https://otlp-http-<personal.olly.nonprd.<mydomain>:443
     endpoint: ""
 
@@ -166,7 +166,7 @@ opentelemetryCollector:
             - otlp
 
 opentelemetry-operator:
-  enabled: false
+  enabled: true
   fullnameOverride: opentelemetry-operator
 
   replicaCount: 2
@@ -208,8 +208,8 @@ opentelemetry-operator:
       # https://github.com/open-telemetry/opentelemetry-operator/issues/2667
       # Operator needed more resources to solve the above issue.
       minAllowed:
-        cpu: 500m
-        memory: 2Gi
+        cpu: 200m 
+        memory: 512Mi
       updatePolicy:
         minReplicas: 1
         updateMode: Auto
