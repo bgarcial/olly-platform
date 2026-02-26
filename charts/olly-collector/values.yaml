@@ -6,6 +6,24 @@ global:
   # cluster: stp-str-tst
   cluster: olly-personal-nonprd
 
+  tempo:
+    # otlp (gRPC) exporter — bare host:port, no scheme, no path.
+    # tempo-eu-west-0.grafana.net:443 is the Grafana Cloud Tempo gRPC endpoint.
+    # Do NOT add https:// — that format is for otlphttp; gRPC requires bare host:port.
+    endpoint: "tempo-eu-west-0.grafana.net:443"
+  
+  mimir:
+    # https://grafana.com/docs/mimir/latest/configure/configure-otel-collector/
+    # otlp_http exporter will append /v1/metrics 
+    # https://github.com/open-telemetry/opentelemetry-collector/blob/main/exporter/otlphttpexporter/README.md#otlp-http-exporter
+    endpoint: "https://prometheus-prod-01-eu-west-0.grafana.net/otlp"
+  
+  loki:
+    endpoint: "https://logs-prod-eu-west-0.grafana.net/loki/api/v1/push"
+    # auth:
+    #   username: ""
+    #   password: ""
+
   promtail:
     # The Olly Loki endpoint to send logs to
     # TBD - Make and up-to-date list of Loki endpoints can be found here:
@@ -15,9 +33,12 @@ global:
 
   opentelemetry:
     # The OpenTelemetry endpoint to send opentelemetry logs, traces and metrics to
-    # TBD - Make and up-to-date list of OpenTelemetry endpoints
     # For example when it comes to htttps in the case the endpoint is being exposed through an Ingress with TLS termination
     # endpoint: https://otlp-http-<personal.olly.nonprd.<mydomain>:443
+
+    # For grafana cloud Otel gateway unified endpoint
+    # https://grafana.com/orgs/bgarcial/stacks/308241/otlp-info
+    # endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
     endpoint: ""
 
 opentelemetryCollector:
@@ -28,6 +49,7 @@ opentelemetryCollector:
   # https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler 
   vpa:
     enabled: true
+
   # Automatic instrumentation of client libraries
   # Ref: https://opentelemetry.io/docs/kubernetes/operator/automatic/
   instrumentation:
@@ -63,14 +85,47 @@ opentelemetryCollector:
         verbosity: detailed
         sampling_initial: 5
         sampling_thereafter: 200
-        
-      # otlphttp:
-      #   endpoint: "{{ .Values.global.opentelemetry.endpoint }}"
+      
+      # https://grafana.com/docs/alloy/latest/collect/opentelemetry-to-lgtm-stack/#grafana-tempo
+      # OTLP/gRPC — persistent connection; keepalive prevents connection resets by load balancers.
+      # endpoint must be bare host:port, no scheme (gRPC handles TLS separately via tls block).
+      otlp/traces:
+        auth:
+          authenticator: basicauth/tempo
+        endpoint: "{{ .Values.global.tempo.endpoint }}"
+        tls:
+          insecure: false
+        keepalive:
+          time: 30s
+          timeout: 10s
+          permit_without_stream: true
+      
+      otlphttp/metrics:
+        auth:
+          authenticator: basicauth/mimir
+        endpoint: "{{ .Values.global.mimir.endpoint }}"
+        tls:
+          insecure: false
+        compression: gzip
+        encoding: proto
+        # Check other attributes for auth retries compression for reducing egress costs
+    
     extensions:
+      basicauth/tempo:
+        client_auth:
+          username: "${env:GRAFANA_CLOUD_TEMPO_USER}"
+          password: "${env:GRAFANA_CLOUD_TOKEN}"
+      basicauth/mimir:
+        client_auth:
+          username: "${env:GRAFANA_CLOUD_MIMIR_USER}"
+          password: "${env:GRAFANA_CLOUD_TOKEN}"
       health_check:
         endpoint: "0.0.0.0:13133"
+    
     processors:
-      batch: {}
+      batch:
+        send_batch_size: 1000
+        timeout: 10s
       filter/drop_noisy_trace_urls:
         error_mode: ignore
         traces:
@@ -140,11 +195,13 @@ opentelemetryCollector:
                     port: 8888
       extensions:
         - health_check
+        - basicauth/tempo
+        - basicauth/mimir
       pipelines:
         metrics:
           exporters:
             - debug 
-            # - otlphttp
+            - otlphttp/metrics
           processors:
             - memory_limiter
             - k8sattributes
@@ -154,8 +211,8 @@ opentelemetryCollector:
             - otlp
         traces:
           exporters:
-            - debug 
-            # - otlphttp
+            - debug
+            - otlp/traces
           processors:
             - memory_limiter
             - filter/drop_noisy_trace_urls

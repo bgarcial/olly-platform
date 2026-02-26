@@ -23,5 +23,20 @@ spec:
         fieldRef:
           apiVersion: v1
           fieldPath: spec.nodeName
+    - name: GRAFANA_CLOUD_TEMPO_USER
+      valueFrom:
+        secretKeyRef:
+          name: grafana-cloud-credentials
+          key: GRAFANA_CLOUD_TEMPO_USER
+    - name: GRAFANA_CLOUD_MIMIR_USER
+      valueFrom:
+        secretKeyRef:
+          name: grafana-cloud-credentials
+          key: GRAFANA_CLOUD_MIMIR_USER
+    - name: GRAFANA_CLOUD_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: grafana-cloud-credentials
+          key: GRAFANA_CLOUD_TOKEN
   config: {{ tpl (toYaml .Values.opentelemetryCollector.config) . | nindent 4 }}
 {{ end }}
