@@ -72,6 +72,17 @@ opentelemetryCollector:
   # processors.memory_limiter: https://github.com/open-telemetry/opentelemetry-collector/blob/main/processor/memorylimiterprocessor/README.md
   config:
     receivers:
+      # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/filelogreceiver
+      filelog:
+        include:
+          - /var/log/pods/**/*.log
+        include_file_path: true 
+        start_at: end
+        # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/pkg/stanza/docs/operators/README.md#what-operators-are-available
+        operators:
+          - id: container-parser
+            type: container
+            
       otlp:
         protocols:
           grpc:
@@ -221,6 +232,16 @@ opentelemetryCollector:
             - resource
           receivers:
             - otlp
+        logs:
+          exporters:
+            - debug
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - batch
+            - resource
+          receivers:
+            - filelog
 
 opentelemetry-operator:
   enabled: true

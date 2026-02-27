@@ -38,5 +38,19 @@ spec:
         secretKeyRef:
           name: grafana-cloud-credentials
           key: GRAFANA_CLOUD_TOKEN
+  volumeMounts:
+    - name: varlogpods
+      mountPath: /var/log/pods
+      readOnly: true
+    - name: varlibdockercontainers
+      mountPath: /var/lib/docker/containers
+      readOnly: true
+  volumes:
+    - name: varlogpods
+      hostPath:
+        path: /var/log/pods
+    - name: varlibdockercontainers
+      hostPath:
+        path: /var/lib/docker/containers
   config: {{ tpl (toYaml .Values.opentelemetryCollector.config) . | nindent 4 }}
 {{ end }}
