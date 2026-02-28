@@ -18,7 +18,7 @@ record in place.
 ```
 disk file line
   → filelog receiver reads it → body = raw string
-      → operator 1 (container) → strips CRI wrapper, extracts k8s metadata
+      → operator 1 (container) → strips or remove the CRI wrapper, extracts k8s metadata
       → operator 2 (json_parser) → parses body if JSON, promotes fields
       → operator 3 (severity_parser) → maps level/severity field → LogRecord.SeverityText
       → ...
@@ -51,7 +51,7 @@ Operators are grouped by function:
 | `trace_parser` | Reads `trace_id` / `span_id` fields and maps to log record trace context |
 | `scope_name_parser` | Extracts instrumentation scope name |
 
-### Transformers — mutate fields without parsing
+### Transformers (general purpose on the docs) — mutate fields without parsing
 
 | Operator | What it does |
 |---|---|
@@ -66,7 +66,7 @@ Operators are grouped by function:
 | `sanitize_utf8` | Replaces invalid UTF-8 bytes |
 | `assign_keys` | Assigns names to positional array values |
 
-### Routing and control
+### Routing and control (also general purpose on the docs)
 
 | Operator | What it does |
 |---|---|
@@ -368,6 +368,143 @@ Why this ordering matters:
    that `json_parser` just populated
 3. `severity_parser` and `time_parser` are independent of each other — order between them
    does not matter
+
+---
+
+## How to check filelog receiver is working alongside the operators
+
+- File log receiver running across all daemonset pods
+
+```bash
+# First got the pod names
+kubectl get pods -n olly-collector \
+-l app.kubernetes.io/component=opentelemetry-collector \
+--no-headers \
+| awk '{print $1}'
+
+# Then looped over them counting two things:
+# - how many times "Starting stanza receiver" appears (= 1 means receiver started)
+# - how many "Started watching file" lines appear (= number of files being tailed)
+for pod in \
+olly-collector-opentelemetry-collector-<pod-id> \
+olly-collector-opentelemetry-collector-<pod-id> \
+olly-collector-opentelemetry-collector-<pod-id> \
+olly-collector-opentelemetry-collector-<pod-id> \
+olly-collector-opentelemetry-collector-<pod-id> \
+olly-collector-opentelemetry-collector-<pod-id> \
+olly-collector-opentelemetry-collector-<pod-id>; do
+stanza=$(kubectl logs -n olly-collector $pod 2>/dev/null \
+| grep "Starting stanza receiver" | wc -l)
+count=$(kubectl logs -n olly-collector $pod 2>/dev/null \
+| grep "Started watching file" | wc -l)
+echo "$pod → stanza_started=$stanza  files_watched=$count"
+done
+```
+Then I get this output:
+
+```bash
+olly-collector-opentelemetry-collector-2f7cd
+olly-collector-opentelemetry-collector-46trq
+olly-collector-opentelemetry-collector-9f5nc
+olly-collector-opentelemetry-collector-gsgff
+olly-collector-opentelemetry-collector-pnq8t
+olly-collector-opentelemetry-collector-r9b94
+olly-collector-opentelemetry-collector-zwnr7
+olly-collector-opentelemetry-collector-48xt7 → stanza_started=0  files_watched=0
+olly-collector-opentelemetry-collector-dkrjf → stanza_started=0  files_watched=0
+olly-collector-opentelemetry-collector-dt5vd → stanza_started=0  files_watched=0
+olly-collector-opentelemetry-collector-gbt4c → stanza_started=0  files_watched=0
+olly-collector-opentelemetry-collector-h7fzr → stanza_started=0  files_watched=0
+olly-collector-opentelemetry-collector-plkx6 → stanza_started=0  files_watched=0
+olly-collector-opentelemetry-collector-wjn6b → stanza_started=0  files_watched=0
+```
+
+For the 7 pods shhowing `stanza_started=0` I checked them individually to confirm that they had started correctly — the startup message had just scrolled out of the log buffer:
+
+```bash
+kubectl logs -n olly-collector olly-collector-opentelemetry-collector-<pod-id> | grep -E "Starting stanza|filelog|no files" | head -10
+```
+
+- Debug exporter — receiving and flushing batches
+See the resource logs and log records counters in each line
+
+```bash
+kubectl logs -n olly-collector -l app.kubernetes.io/component=opentelemetry-collector --tail=200 | grep '"otelcol.component.id":"debug"' | grep '"otelcol.signal":"logs"' | grep '"msg":"Logs"' | tail -10
+{"level":"info","ts":"2026-02-28T04:47:07.251Z","msg":"Logs","resource":{"service.instance.id":"018def47-d1a7-4bde-a372-8aefa016358c","service.name":"otelcol-k8s","service.version":"0.134.0"},"otelcol.component.id":"debug","otelcol.component.kind":"exporter","otelcol.signal":"logs","resource logs":41,"log records":41}
+```
+
+### Container operator — working, k8s metadata extracted from file path SeverityText was empty
+
+SeverityText:   (empty)
+SeverityNumber: Unspecified(0)
+
+The severity fields are empty. That's expected — you only have the container operator configured right now. The json_parser + severity_parser chain from the doc hasn't been added yet, so the JSON body is collected as a raw string but the level field inside it is never promoted to SeverityText. That's the next step when I add those operators.
+
+\ResourceLog detail block + empty severity — both come from the same command
+
+The debug exporter with verbosity: detailed emits two types of log entries per flush:
+
+- A summary line: "msg":"Logs" with counts
+- One or more detail lines: "msg":"ResourceLog #0\n..." with the full record
+
+```bash
+kubectl logs -n olly-collector \
+-l app.kubernetes.io/component=opentelemetry-collector \
+--tail=500 \
+| grep '"otelcol.component.id":"debug"' \
+| grep '"otelcol.signal":"logs"' \
+| grep '"msg":"ResourceLog'
+```
+
+Each matching line is a single JSON object whose msg field contains the full multiline record as an escaped string. To render it readable:
+
+```bash
+kubectl logs -n olly-collector \
+-l app.kubernetes.io/component=opentelemetry-collector \
+--tail=500 \
+| grep '"otelcol.component.id":"debug"' \
+| grep '"otelcol.signal":"logs"' \
+| grep '"msg":"ResourceLog' \
+| head -1 \
+| python3 -c "
+import sys, json
+line = sys.stdin.read().strip()
+obj = json.loads(line)
+print(obj['msg'])
+"
+```
+
+That prints the msg field with its \n sequences expanded, giving you the full block:
+
+```bash
+ResourceLog #0
+Resource SchemaURL:
+Resource attributes:
+-> k8s.container.name:          otc-container
+-> k8s.namespace.name:          olly-collector
+-> k8s.pod.name:                olly-collector-opentelemetry-collector-48xt7
+-> k8s.container.restart_count: 3
+-> k8s.pod.uid:                 f5519bdf-6afb-4570-87d4-c91915b8d4ef
+-> k8s.daemonset.name:          olly-collector-opentelemetry-collector
+-> k8s.node.name:               k8s-test-cluster-control-plane
+-> k8s.cluster.name:            olly-personal-nonprd
+ScopeLogs #0
+InstrumentationScope
+LogRecord #0
+ObservedTimestamp: 2026-02-27 06:20:29.640363405 +0000 UTC
+Timestamp:         2026-02-27 06:20:29.640274533 +0000 UTC
+SeverityText:                          ← this field was empty in the output
+SeverityNumber: Unspecified(0)         ← this field was 0
+Body: Str({"level":"info","ts":"2026-02-27T06:20:29.640Z","msg":"Started watching file",...})
+Attributes:
+-> log.iostream:  stderr
+-> logtag:        F
+-> log.file.path: /var/log/pods/olly-collector_.../otc-container/3.log
+-> log.file.name: 3.log
+```
+
+The SeverityText and SeverityNumber: Unspecified(0) fields are right there in the same block — they show up empty because json_parser and severity_parser aren't
+in the operator chain yet, so the level field inside the JSON body is never read.
 
 ---
 

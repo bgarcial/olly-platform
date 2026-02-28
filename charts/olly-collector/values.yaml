@@ -19,10 +19,7 @@ global:
     endpoint: "https://prometheus-prod-01-eu-west-0.grafana.net/otlp"
   
   loki:
-    endpoint: "https://logs-prod-eu-west-0.grafana.net/loki/api/v1/push"
-    # auth:
-    #   username: ""
-    #   password: ""
+    endpoint: "https://logs-prod-eu-west-0.grafana.net/otlp"
 
   promtail:
     # The Olly Loki endpoint to send logs to
@@ -60,10 +57,10 @@ opentelemetryCollector:
     namespaces: []
   resources:
     limits:
-      memory: 500Mi
+      memory: 1Gi
     requests:
       cpu: 250m
-      memory: 500Mi
+      memory: 1Gi
   serviceMonitor:
     labels:
       prometheus: main-prometheus
@@ -120,7 +117,14 @@ opentelemetryCollector:
         compression: gzip
         encoding: proto
         # Check other attributes for auth retries compression for reducing egress costs
-    
+      
+      otlphttp/logs:
+        auth:
+          authenticator: basicauth/loki
+        endpoint: "{{ .Values.global.loki.endpoint }}"
+        tls:
+          insecure: false
+
     extensions:
       basicauth/tempo:
         client_auth:
@@ -129,6 +133,10 @@ opentelemetryCollector:
       basicauth/mimir:
         client_auth:
           username: "${env:GRAFANA_CLOUD_MIMIR_USER}"
+          password: "${env:GRAFANA_CLOUD_TOKEN}"
+      basicauth/loki:
+        client_auth:
+          username: "${env:GRAFANA_CLOUD_LOKI_USER}"
           password: "${env:GRAFANA_CLOUD_TOKEN}"
       health_check:
         endpoint: "0.0.0.0:13133"
@@ -208,6 +216,7 @@ opentelemetryCollector:
         - health_check
         - basicauth/tempo
         - basicauth/mimir
+        - basicauth/loki
       pipelines:
         metrics:
           exporters:
@@ -234,7 +243,7 @@ opentelemetryCollector:
             - otlp
         logs:
           exporters:
-            - debug
+            - otlphttp/logs
           processors:
             - memory_limiter
             - k8sattributes
