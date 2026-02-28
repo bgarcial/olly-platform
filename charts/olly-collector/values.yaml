@@ -57,10 +57,10 @@ opentelemetryCollector:
     namespaces: []
   resources:
     limits:
-      memory: 1Gi
+      memory: 500Mi
     requests:
       cpu: 250m
-      memory: 1Gi
+      memory: 500Mi
   serviceMonitor:
     labels:
       prometheus: main-prometheus
