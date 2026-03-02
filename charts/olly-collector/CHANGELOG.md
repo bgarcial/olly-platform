@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.0] - 20226-03-02
+
+### Added
+
+- **OpenTelemetry Collector filelog receiver** as promtail is deprecated.
+  - Container parser operator was added.
+- **`otlphttp/logs`** exporter to send logs to Loki.
+- **`basicauth/loki`** entry to authenticate to Loki Grafana Cloud endpoint.
+- `GRAFANA_CLOUD_LOKI_USER` env var and key to the `grafana-cloud-credentials` secret.
+- Mounting `/var/log/pods` volume on Open telemetry collector template.
+- Documentation about filelog receiver and its operators used.
+
+### Removed
+
+- Promtail daemonset was decomissioned.
+
 ## [0.0.4] - 2026-02-25
 
 ### Changed
