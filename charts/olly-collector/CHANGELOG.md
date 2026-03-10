@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.1] - 2026-03-10
+## [1.0.1] - 2026-03-10 ([PR #2](https://github.com/bgarcial/olly-platform/pull/2))
 
 ### Added
 
@@ -37,7 +37,7 @@
 
 - `global.cluster` renamed from `olly-personal-nonprd` to `olly-do-nonprd` to differentiate from the local Kind cluster.
 
-## [1.0.0] - 2026-03-02
+## [1.0.0] - 2026-03-02 ([PR #1](https://github.com/bgarcial/olly-platform/pull/1))
 
 ### Added
 
