@@ -18,6 +18,10 @@ spec:
     - operator: Exists
   priorityClassName: system-node-critical
   env:
+    - name: K8S_NODE_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.hostIP
     - name: KUBE_NODE_NAME
       valueFrom:
         fieldRef:

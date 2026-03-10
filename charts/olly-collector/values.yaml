@@ -4,7 +4,7 @@ global:
   #
   # For example:
   # cluster: stp-str-tst
-  cluster: olly-personal-nonprd
+  cluster: olly-do-nonprd
 
   tempo:
     # otlp (gRPC) exporter — bare host:port, no scheme, no path.
@@ -72,13 +72,57 @@ opentelemetryCollector:
         operators:
           - id: container-parser
             type: container
-            
       otlp:
         protocols:
           grpc:
             endpoint: 0.0.0.0:4317
           http:
             endpoint: 0.0.0.0:4318
+      kubeletstats:
+        collection_interval: 60s
+        auth_type: "serviceAccount"
+        endpoint: "https://${env:K8S_NODE_IP}:10250"
+        node: '${env:KUBE_NODE_NAME}'
+        insecure_skip_verify: true
+        metric_groups: [ container, pod, node, volume ]
+        # Required for *.node.utilization metrics — enables the receiver
+        # to query the Kubernetes API for node capacity (Status.Capacity)
+        k8s_api_config:
+          auth_type: serviceAccount
+        metrics:
+          container.uptime:
+            enabled: true
+          k8s.container.cpu.node.utilization:
+            enabled: true
+          k8s.container.cpu_limit_utilization:
+            enabled: true
+          k8s.container.cpu_request_utilization:
+            enabled: true
+          k8s.container.memory.node.utilization:
+            enabled: true
+          k8s.container.memory_limit_utilization:
+            enabled: true
+          k8s.container.memory_request_utilization:
+            enabled: true
+          k8s.node.uptime:
+            enabled: true
+          k8s.pod.cpu.node.utilization:
+            enabled: true
+          k8s.pod.cpu_limit_utilization:
+            enabled: true
+          k8s.pod.cpu_request_utilization:
+            enabled: true
+          k8s.pod.memory.node.utilization:
+            enabled: true
+          k8s.pod.memory_limit_utilization:
+            enabled: true
+          k8s.pod.memory_request_utilization:
+            enabled: true
+          k8s.pod.uptime:
+            enabled: true
+          # When I upgrade the collector version
+          # k8s.pod.volume.usage:
+          #   enabled: true 
     exporters:
       # Use debug for testing as I don't have an otlp endpoint yet.
       # https://github.com/open-telemetry/opentelemetry-collector/blob/main/exporter/debugexporter/README.md#getting-started
@@ -194,6 +238,16 @@ opentelemetryCollector:
           - action: insert
             key: k8s.cluster.name
             value: "{{ .Values.global.cluster }}"
+      # Promote k8s.node.name from resource attribute to datapoint attribute
+      # so it becomes a Prometheus label in Mimir. It is needed for node-level metrics
+      # from kubeletstats — the k8sattributes processor can't enrich these
+      # (no pod to match), and Mimir Cloud doesn't auto-promote all resource attributes.
+      # https://grafana.com/blog/opentelemetry-with-prometheus-better-integration-through-resource-attribute-promotion/#enabling-resource-attribute-promotion
+      transform/promote_node_name:
+        metric_statements:
+          - context: datapoint
+            statements:
+              - set(attributes["k8s.node.name"], resource.attributes["k8s.node.name"]) where resource.attributes["k8s.node.name"] != nil
     service:
       telemetry:
         logs:
@@ -213,15 +267,17 @@ opentelemetryCollector:
       pipelines:
         metrics:
           exporters:
-            - debug 
+            - debug
             - otlphttp/metrics
           processors:
             - memory_limiter
             - k8sattributes
             - batch
             - resource
+            - transform/promote_node_name
           receivers:
             - otlp
+            - kubeletstats
         traces:
           exporters:
             - debug
