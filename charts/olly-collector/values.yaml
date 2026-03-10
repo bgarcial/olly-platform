@@ -239,9 +239,10 @@ opentelemetryCollector:
             key: k8s.cluster.name
             value: "{{ .Values.global.cluster }}"
       # Promote k8s.node.name from resource attribute to datapoint attribute
-      # so it becomes a Prometheus label in Mimir. Needed for node-level metrics
+      # so it becomes a Prometheus label in Mimir. It is needed for node-level metrics
       # from kubeletstats — the k8sattributes processor can't enrich these
-      # (no pod to match), and Mimir doesn't auto-promote all resource attributes.
+      # (no pod to match), and Mimir Cloud doesn't auto-promote all resource attributes.
+      # https://grafana.com/blog/opentelemetry-with-prometheus-better-integration-through-resource-attribute-promotion/#enabling-resource-attribute-promotion
       transform/promote_node_name:
         metric_statements:
           - context: datapoint
