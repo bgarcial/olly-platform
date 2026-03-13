@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.2] - 2026-03-13 ([PR #5](https://github.com/bgarcial/olly-platform/pull/5))
+## [1.0.3] - 2026-03-13 ([PR #5](https://github.com/bgarcial/olly-platform/pull/5))
 
 ### Fixed
 
