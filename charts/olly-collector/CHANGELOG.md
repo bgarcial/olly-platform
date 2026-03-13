@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.0.2] - 2026-03-13
+
+### Changed
+
+- **Telemetry data flow diagram** updated to reflect current architecture:
+  - Removed Promtail — logs are now collected by the OTel Collector via the `filelog` receiver.
+  - Added OTel Demo as a telemetry source (manual instrumentation sending traces + metrics).
+  - Added kubelet as a metrics source via the `kubeletstats` receiver.
+  - Backends updated from "TBD — not yet connected" to live Grafana Cloud endpoints (Loki, Mimir, Tempo).
+  - Signal Types table expanded with Source, Exporter columns and updated processor chains.
+  - Replaced "Switching from Debug" placeholder section with actual Backend Configuration.
+- **Deploy how-to** updated:
+  - Added VPA prerequisite with link to `docs/VPA.md`.
+  - Added Kyverno prerequisite with `helm upgrade --install` command and link to `infrastructure/kyverno/values.yaml`.
+  - Added `GRAFANA_CLOUD_LOKI_USER` to the secret creation command and lookup table.
+  - Added `logs:write` scope to the `GRAFANA_CLOUD_TOKEN` description.
+  - Removed stale "Promtail DaemonSet" reference from Step 1.
+
+### Removed
+
+- Deleted outdated docs: `daemonset-node-topology.md`, `filelog-receiver-operators.md`, Grafana Cloud research notes, troubleshooting `006-collector-oomkilled-filelog-debug-loop.md`.
+
 ## [1.0.1] - 2026-03-10 ([PR #2](https://github.com/bgarcial/olly-platform/pull/2))
 
 ### Added
