@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.0.2] - 2026-03-13 ([PR #5](https://github.com/bgarcial/olly-platform/pull/5))
+
+### Fixed
+
+- **`debug` exporter verbosity reduced from `detailed` to `basic`** to fix `max entry size exceeded` errors when exporting logs to Grafana Cloud Loki.
+  - **Root cause**: With `verbosity: detailed`, the debug exporter serializes entire span/metric batches as single `logger.Info()` calls via the collector's internal zap logger. These are written to stderr, captured by the kubelet as container log files under `/var/log/pods/`, and then picked up by the `filelog` receiver — which feeds the logs pipeline and sends them to Loki via `otlphttp/logs`. A single batch of spans serialized at `detailed` verbosity produced log lines of ~524KB, exceeding Loki's `max_line_size` limit of 262,144 bytes (256KB).
+  - **Side effects**: When Loki rejected an oversized entry with HTTP 400, the entire batch was dropped, including normal-sized log records that happened to be in the same batch. This caused intermittent loss of legitimate application and collector logs.
+  - `normal` verbosity was not considered as it writes ~1 line per span/metric record. While each line is small (~200-500 bytes), this duplicates telemetry data already stored in Tempo (traces) and Mimir (metrics) as text log lines in Loki — increasing ingestion costs with no observability benefit. `basic` writes only batch-level counts e.g:
+  
+```bash
+  2026-03-13 12:15:07.316 INFO {
+  "level": "info",
+  "ts": "2026-03-13T11:15:07.316Z",
+  "msg": "Traces",
+  "resource": {
+    "service.instance.id": "0d1e30e6-d609-4449-af5e-b0c26729d8d6",
+    "service.name": "otelcol-k8s",
+    "service.version": "0.134.0"
+  },
+  "otelcol.component.id": "debug",
+  "otelcol.component.kind": "exporter",
+  "otelcol.signal": "traces",
+  "resource spans": 7,
+  "spans": 33
+} 
+```
+This kind of proof duplicated data is not getting o the debug exporter.
+
 ## [1.0.1] - 2026-03-10 ([PR #2](https://github.com/bgarcial/olly-platform/pull/2))
 
 ### Added
