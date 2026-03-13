@@ -11,7 +11,7 @@ C4Context
     Person(dev, "Application Developer", "Annotates pods to opt in to auto-instrumentation. Queries traces, metrics, and logs in Grafana.")
     Person(platformOp, "Platform Operator", "Installs and upgrades the olly-collector chart. Configures backends and manages Kyverno policies.")
 
-    System(ollyCollector, "olly-collector", "Helm chart deploying OTel Collector (DaemonSet) + OTel Operator + Promtail. Collects traces, metrics, and logs from instrumented applications.")
+    System(ollyCollector, "olly-collector", "Helm chart deploying OTel Collector (DaemonSet) + OTel Operator. Collects traces, metrics, and logs from instrumented applications.")
 
     System_Ext(appWorkloads, "Application Workloads", "Java, Node.js, Python, Go, nginx, Apache apps running in the cluster. Use OTel SDK manually or get auto-instrumented.")
 
@@ -19,8 +19,8 @@ C4Context
     System_Ext(kyverno, "Kyverno", "Policy engine. Required for auto-instrumentation CR propagation across namespaces. Must be pre-installed.")
 
     System_Ext(tempo, "Tempo", "Distributed trace storage and query. Receives OTLP HTTP traces from collector.")
-    System_Ext(mimir, "Mimir", "Metrics storage (Prometheus-compatible). Receives OTLP HTTP metrics from collector.")
-    System_Ext(loki, "Loki", "Log aggregation. Receives logs from Promtail via HTTP push.")
+    System_Ext(mimir, "Mimir", "Metrics storage (Prometheus-compatible). Receives OTLP HTTP metrics from kubeletstats receiver and otel-demo apps.")
+    System_Ext(loki, "Loki", "Log aggregation. Receives logs from Otel filelog receiver via otlphttp/logs exporter.")
     System_Ext(grafana, "Grafana", "Dashboards, alerts, and exploration for all three signal types.")
 
     Rel(platformOp, ollyCollector, "Installs / configures", "helm install / helm upgrade")
@@ -30,9 +30,9 @@ C4Context
     Rel(appWorkloads, ollyCollector, "Sends telemetry", "OTLP gRPC :4317 / HTTP :4318")
     Rel(ollyCollector, appWorkloads, "Injects OTel SDK agents", "Admission webhook (via OTel Operator)")
 
-    Rel(ollyCollector, tempo, "Exports traces", "OTLP HTTP (TBD)")
-    Rel(ollyCollector, mimir, "Exports metrics", "OTLP HTTP (TBD)")
-    Rel(ollyCollector, loki, "Pushes logs", "HTTP /loki/api/v1/push (TBD)")
+    Rel(ollyCollector, tempo, "Exports traces", "OTLP HTTP")
+    Rel(ollyCollector, mimir, "Exports metrics", "OTLP HTTP")
+    Rel(ollyCollector, loki, "Export logs", "OTLP HTTP")
 
     Rel(tempo, grafana, "Trace data source")
     Rel(mimir, grafana, "Metrics data source")
@@ -48,14 +48,13 @@ C4Context
 |--------|-------|----------------------|
 | OTel Collector DaemonSet | Platform team | **Yes** |
 | OTel Operator | Platform team | **Yes** (as dependency) |
-| Promtail | Platform team | **Yes** (as dependency) |
 | cert-manager | Platform team | No — pre-requisite |
 | Kyverno | Platform team | No — pre-requisite |
-| Tempo | Platform team | No — separate deployment |
-| Mimir | Platform team | No — separate deployment |
-| Loki | Platform team | No — separate deployment |
-| Grafana | Platform team | No — separate deployment |
-| Application workloads | Development teams | No — consumers of this chart |
+| Tempo | Grafana Cloud | No — SaaS |
+| Mimir | Grafana Cloud | No — SaaS |
+| Loki | Grafana Cloud | No — SaaS |
+| Grafana | Grafana Cloud | No — SaaS |
+| Application workloads | Development teams - otel-demo for now. | No — consumers of this chart |
 
 ## Prerequisites (Must Pre-Exist)
 
