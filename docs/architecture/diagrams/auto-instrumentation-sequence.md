@@ -89,10 +89,10 @@ sequenceDiagram
 
 ## Key Timing Notes
 
-| Event | Trigger | Latency |
-|-------|---------|---------|
-| ClusterPolicy generates Instrumentation CRs | Namespace creation | ~1-5s |
-| OTel Operator mutates pod | Pod admission | ~100-500ms |
-| Collector starts receiving spans | App container starts | Seconds |
-| k8sattributes enriches spans | After pod IP registered | ~5-30s (kube-state-sync) |
-| VPA recommends resource adjustments | After ~30min of traffic | 30+ minutes |
+| Event | Trigger |
+|-------|---------|
+| ClusterPolicy generates Instrumentation CRs | Namespace creation |
+| OTel Operator mutates pod | Pod admission |
+| Collector starts receiving spans | App container starts |
+| k8sattributes enriches spans | After pod IP registered |
+| VPA recommends resource adjustments | After ~30min of traffic |
