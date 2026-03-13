@@ -1,13 +1,30 @@
 # How to Deploy `olly-collector`
 
 **Why not `helm upgrade`?**
-The `opentelemetry-operator` sub-chart embeds its CRDs inside `conf/crds/` (924 KB uncompressed). Helm serialises the full chart source into a Kubernetes Secret per release; once the Secret exceeds the 1 MB Kubernetes limit, `helm upgrade` fails permanently. See [troubleshooting/helm/001](../troubleshooting/helm/001-helm-release-secret-too-large.md) for the full root-cause analysis.
-
-The fix is to mimic what ArgoCD does: render with `helm template`, apply with `kubectl`. No `sh.helm.release.v1.*` Secrets are created, so the 1 MB limit is never hit.
+The `opentelemetry-operator` sub-chart embeds its CRDs inside `conf/crds/` (924 KB uncompressed). Helm serialises the full chart source into a Kubernetes Secret per release; once the Secret exceeds the 1 MB Kubernetes limit, `helm upgrade` fails permanently. See [this issue](https://github.com/bgarcial/olly-platform/issues/3)
 
 ---
 
 ## Prerequisites
+
+### VPA (Vertical Pod Autoscaler)
+
+The collector uses a VPA resource to right-size pod memory. VPA (and its dependency, Metrics Server) must be installed before deploying the chart. See [VPA setup instructions](../VPA.md).
+
+### Kyverno
+
+The chart includes a `ClusterPolicy` that propagates `Instrumentation` CRs to application namespaces. Kyverno must be installed before deploying the chart, otherwise the `ClusterPolicy` resource will fail to apply.
+
+Install Kyverno using the [kyverno Helm chart](https://artifacthub.io/packages/helm/kyverno/kyverno) with the custom values in [`infrastructure/kyverno/values.yaml`](../../infrastructure/kyverno/values.yaml):
+
+```bash
+helm upgrade --install kyverno kyverno/kyverno \
+  --namespace kyverno \
+  --create-namespace \
+  -f infrastructure/kyverno/values.yaml
+```
+
+The custom values grant the admission and background controllers RBAC permissions on `opentelemetry.io/instrumentations` so Kyverno can generate and synchronize the Instrumentation CRs across namespaces.
 
 ### Grafana Cloud credentials secret
 
@@ -22,6 +39,7 @@ kubectl create secret generic grafana-cloud-credentials \
   --namespace olly-collector \
   --from-literal=GRAFANA_CLOUD_TEMPO_USER='<tempo-datasource-id>' \
   --from-literal=GRAFANA_CLOUD_MIMIR_USER='<mimir-datasource-id>' \
+  --from-literal=GRAFANA_CLOUD_LOKI_USER='<loki-datasource-id>' \
   --from-literal=GRAFANA_CLOUD_TOKEN='<grafana-cloud-api-token>'
 ```
 
@@ -31,20 +49,10 @@ Where to find each value in Grafana Cloud:
 |-----|-----------------|
 | `GRAFANA_CLOUD_TEMPO_USER` | Stack page → Tempo → Username (numeric ID, e.g. `153770`) |
 | `GRAFANA_CLOUD_MIMIR_USER` | Stack page → Prometheus → Username (numeric ID, e.g. `316580`) |
-| `GRAFANA_CLOUD_TOKEN` | Stack page → Access Policies → create a token with `metrics:write`, `traces:write` scopes |
+| `GRAFANA_CLOUD_LOKI_USER` | Stack page → Loki → Username (numeric ID) |
+| `GRAFANA_CLOUD_TOKEN` | Stack page → Access Policies → create a token with `metrics:write`, `traces:write`, `logs:write` scopes |
 
-**What happens if the secret is missing or wrong:**
-
-| Scenario | Behaviour |
-|----------|-----------|
-| Secret does not exist | Pods fail at container creation with `CreateContainerConfigError` — they never start. Kubernetes refuses to inject the env vars. |
-| Secret exists, wrong credentials | Pods start and the collector runs, but every export to Tempo/Mimir fails with HTTP `401 Unauthorized`. |
-
-To verify the secret exists before deploying:
-
-```bash
-kubectl get secret grafana-cloud-credentials -n olly-collector
-```
+**Create the secrets before deploying the collector**
 
 **Secret management roadmap:**
 This secret is currently created manually and is not managed by Helm. The plan is to:
@@ -73,7 +81,7 @@ helm template olly-collector charts/olly-collector \
   | kubectl apply -n olly-collector -f -
 ```
 
-This idempotently creates or updates: CRDs, RBAC, the Operator Deployment, Promtail DaemonSet, VPA, ServiceAccounts, Certificates, and the OpenTelemetryCollector CR.
+This idempotently creates or updates: CRDs, RBAC, the Operator Deployment, VPA, ServiceAccounts, Certificates, and the OpenTelemetryCollector CR.
 
 ### Step 2 — replace the CR (conditional)
 
@@ -103,26 +111,6 @@ helm template olly-collector charts/olly-collector \
 
 ---
 
-## Does the DaemonSet restart automatically?
-
-**Yes.** You do not need `kubectl rollout restart` after a deploy.
-
-When the CR spec changes, the OTel Operator reconciles immediately:
-
-1. Operator detects the CR update.
-2. Operator writes a new ConfigMap containing the rendered collector config.
-3. Operator updates the DaemonSet pod template annotation with the new ConfigMap hash.
-4. The DaemonSet controller triggers a rolling update automatically.
-
-To monitor (not trigger) the rollout:
-
-```bash
-kubectl rollout status daemonset/olly-collector-opentelemetry-collector \
-  -n olly-collector
-```
-
----
-
 ## Updating CRDs when bumping the operator version
 
 CRDs must be applied with `--server-side` to handle large objects (the OTel CRDs exceed the client-side apply annotation limit).
@@ -136,15 +124,3 @@ helm template olly-collector charts/olly-collector \
 ```
 
 Run this before the standard deploy when `opentelemetry-operator.version` changes in `Chart.yaml`.
-
----
-
-## Quick reference
-
-| Scenario | Command |
-|----------|---------|
-| Config change (values, processors, exporters) | Step 1 + Step 2 |
-| First install | Step 1 only (CR does not exist yet for Step 2) |
-| Operator version bump | CRD update, then Step 1 + Step 2 |
-| Monitor rollout | `kubectl rollout status daemonset/...` |
-| Verify no errors | `kubectl logs -l app.kubernetes.io/name=olly-collector-opentelemetry-collector -n olly-collector --since=2m \| grep '"level":"error"'` |
