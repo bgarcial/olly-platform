@@ -127,7 +127,7 @@ opentelemetryCollector:
       # Use debug for testing as I don't have an otlp endpoint yet.
       # https://github.com/open-telemetry/opentelemetry-collector/blob/main/exporter/debugexporter/README.md#getting-started
       debug:
-        verbosity: detailed
+        verbosity: basic
         sampling_initial: 5
         sampling_thereafter: 200
       
@@ -180,6 +180,7 @@ opentelemetryCollector:
     
     processors:
       batch:
+        # Group up  to 1000 spans/metrics/logs or wait up to 10s before sending to the exporter
         send_batch_size: 1000
         timeout: 10s
       filter/drop_noisy_trace_urls:
