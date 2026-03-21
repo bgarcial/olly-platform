@@ -124,7 +124,8 @@ opentelemetryCollector:
           # k8s.pod.volume.usage:
           #   enabled: true 
     exporters:
-      # Use debug for testing as I don't have an otlp endpoint yet.
+      # Do not enable the debug exporter in any pipeline
+      # Only use for (local) troubleshooting
       # https://github.com/open-telemetry/opentelemetry-collector/blob/main/exporter/debugexporter/README.md#getting-started
       debug:
         verbosity: basic
@@ -268,7 +269,6 @@ opentelemetryCollector:
       pipelines:
         metrics:
           exporters:
-            - debug
             - otlphttp/metrics
           processors:
             - memory_limiter
@@ -281,7 +281,6 @@ opentelemetryCollector:
             - kubeletstats
         traces:
           exporters:
-            - debug
             - otlp/traces
           processors:
             - memory_limiter
