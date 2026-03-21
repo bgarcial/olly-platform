@@ -5,7 +5,7 @@ apiVersion: v2
 name: olly-collector
 description: The olly collectors Helm chart
 type: application
-version: 1.0.1
+version: 1.0.3
 appVersion: 0.0.4
 
 dependencies:

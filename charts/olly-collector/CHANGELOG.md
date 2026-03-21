@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.0.3] - 2026-03-13 ([PR #5](https://github.com/bgarcial/olly-platform/pull/5))
+
+### Fixed
+
+- **`debug` exporter was removed from the metrics and traces pipeline** to fix `max entry size exceeded` errors when exporting logs to Grafana Cloud Loki.
+  - **Root cause**: With `verbosity: detailed`, the debug exporter serializes entire span/metric batches as single `logger.Info()` calls via the collector's internal zap logger. These are written to stderr, captured by the kubelet as container log files under `/var/log/pods/`, and then picked up by the `filelog` receiver — which feeds the logs pipeline and sends them to Loki via `otlphttp/logs`. A single batch of spans serialized at `detailed` verbosity produced log lines of ~524KB, exceeding Loki's `max_line_size` limit of 262,144 bytes (256KB).
+  - **Side effects**: When Loki rejected an entry with HTTP 400, the entire batch was dropped, including normal-sized log records that happened to be in the same batch. This caused intermittent loss of legitimate application and collector logs.
+  - Neither `basic` (the most silent one) or `normal` verbosity were considered as it writes ~1 line per span/metric record. While each line is small (~200-500 bytes), this duplicates telemetry data already stored in Tempo (traces) and Mimir (metrics) as text log lines in Loki — increasing ingestion costs with no observability benefit.
+  `basic` writes only batch-level counts e.g:
+  
+```bash
+  2026-03-13 12:15:07.316 INFO {
+  "level": "info",
+  "ts": "2026-03-13T11:15:07.316Z",
+  "msg": "Traces",
+  "resource": {
+    "service.instance.id": "0d1e30e6-d609-4449-af5e-b0c26729d8d6",
+    "service.name": "otelcol-k8s",
+    "service.version": "0.134.0"
+  },
+  "otelcol.component.id": "debug",
+  "otelcol.component.kind": "exporter",
+  "otelcol.signal": "traces",
+  "resource spans": 7,
+  "spans": 33
+} 
+```
+This kind of proof duplicated data is not getting on the debug exporter.
+
+But all this data I can get them from pipeline metrics. See the [feedback section from this issue](https://github.com/bgarcial/olly-platform/issues/4#issuecomment-4065266676)
+
+
 ## [1.0.2] - 2026-03-13
 
 ### Changed
