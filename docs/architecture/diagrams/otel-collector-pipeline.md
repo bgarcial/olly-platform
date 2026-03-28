@@ -4,23 +4,33 @@ How telemetry flows through the collector — from ingestion to export.
 
 ## Overview
 
-```mermaid
-flowchart LR
-    A(["Apps<br/>OTLP gRPC · HTTP"]) --> R
-    K(["Kubelet<br/>stats API"]) --> R
-    F(["Log files<br/>/var/log/pods"]) --> R
+```text
+                  OTel Collector · DaemonSet · one per node
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                        extensions                        │ │
+│  │  health_check · basicauth/tempo · basicauth/mimir       │ │
+│  │  basicauth/loki                                         │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                               │
+│  ┌──────────────┐   ┌─────────────────┐   ┌───────────────┐ │
+│  │ receivers     │   │ processors      │   │ exporters     │ │
+│  │               │   │                 │   │               │ │
+│  │ otlp          │   │ memory_limiter  │   │ otlp/traces   │ │
+│  │ filelog       │──▶│ filter          │──▶│ otlphttp/     │ │
+│  │ kubeletstats  │   │ k8sattributes   │   │   metrics     │ │
+│  │               │   │ batch           │   │ otlphttp/logs │ │
+│  │               │   │ resource        │   │               │ │
+│  │               │   │ transform       │   │               │ │
+│  └──────────────┘   └─────────────────┘   └───────────────┘ │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
 
-    subgraph C["OTel Collector · DaemonSet · one per node"]
-        R[Receivers] --> P[Processors] --> E[Exporters]
-        X["Extensions: health_check · basicauth/*"]
-    end
-
-    E --> T(["Tempo<br/>traces"])
-    E --> M(["Mimir<br/>metrics"])
-    E --> L(["Loki<br/>logs"])
-
-    style C fill:#f5f5f5,stroke:#424242
-    style X fill:#e8eaf6,stroke:#5c6bc0
+Exports to Grafana Cloud:
+  otlp/traces      ──▶ Tempo  (gRPC)
+  otlphttp/metrics ──▶ Mimir  (HTTP)
+  otlphttp/logs    ──▶ Loki   (HTTP)
 ```
 
 Three pipelines (traces, metrics, logs) share the same collector instance but run independent receiver → processor → exporter chains.
