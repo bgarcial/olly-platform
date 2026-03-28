@@ -51,7 +51,7 @@ flowchart LR
 
     R --> ML --> F --> K --> B --> RS --> EX
 
-    style F fill:#fce4ec,stroke:#c62828
+    style F fill:#b71c1c,stroke:#e57373,color:#fff
 ```
 
 Only pipeline with a filter — drops health-check and probe spans before enrichment.
@@ -71,7 +71,7 @@ flowchart LR
 
     R1 & R2 --> ML --> K --> B --> RS --> TR --> EX
 
-    style TR fill:#e3f2fd,stroke:#1565c0
+    style TR fill:#0d47a1,stroke:#64b5f6,color:#fff
 ```
 
 Two receivers: application metrics via OTLP and infrastructure metrics from the kubelet stats API (node, pod, container, volume).
