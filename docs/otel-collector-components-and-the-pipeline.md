@@ -1,70 +1,61 @@
 # OTel Collector Components and Pipelines
 
-Maps the olly-collector's OpenTelemetry Collector configuration to the four component categories defined by the [OTel Collector architecture](https://opentelemetry.io/docs/collector/).
+I want to start by correlating the Otel Collector configuration for this project to the four component categories [defined in the oficial documentation](https://opentelemetry.io/docs/collector/). Yes, there is a fifth one which is connectors, but I am not using them yet.
 
 ## Components Overview
 
-An OTel Collector is built from four component types. Three of them (receivers, processors, exporters) form **pipelines**. The fourth (extensions) operates outside pipelines but can be referenced by pipeline components.
+- The receivers, processors, and exporters are part of the  **Otel Collector pipelines**. 
+- The fourth, extensions, they are related to the collector but they are not part of any pipeline, thus they don't process any telemetry. They can be referenced by pipeline components.
 
-```mermaid
-block-beta
-    columns 3
-
-    block:Receivers:1
-        columns 1
-        r_title["Receivers"]
-        r1["otlp\ngRPC :4317 / HTTP :4318"]
-        r2["filelog\n/var/log/pods/**/*.log"]
-        r3["kubeletstats\nhttps://${K8S_NODE_IP}:10250\n60s interval"]
-    end
-
-    block:Processors:1
-        columns 1
-        p_title["Processors"]
-        p1["memory_limiter"]
-        p2["filter/drop_noisy_trace_urls"]
-        p3["k8sattributes"]
-        p4["batch"]
-        p5["resource"]
-        p6["transform/promote_node_name"]
-    end
-
-    block:Exporters:1
-        columns 1
-        e_title["Exporters"]
-        e1["otlp/traces → Tempo\ngRPC"]
-        e2["otlphttp/metrics → Mimir"]
-        e3["otlphttp/logs → Loki"]
-        e4["debug\n(troubleshooting only)"]
-    end
-
-    block:Extensions:3
-        columns 1
-        ext_title["Extensions (outside pipelines)"]
-        ext1["health_check :13133 — K8s liveness/readiness probes"]
-        ext2["basicauth/tempo — credentials for otlp/traces exporter"]
-        ext3["basicauth/mimir — credentials for otlphttp/metrics exporter"]
-        ext4["basicauth/loki — credentials for otlphttp/logs exporter"]
-    end
-
-    style r_title fill:none,stroke:none
-    style p_title fill:none,stroke:none
-    style e_title fill:none,stroke:none
-    style ext_title fill:none,stroke:none
+```
+ olly-collector (OpenTelemetry Collector)
+ ┌──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │                                                                                                      │
+ │              ┌──────────────────────────────────────────────────────────────────────┐                 │
+ │              │  Extensions: health_check, basicauth/tempo, basicauth/mimir,        │                 │
+ │              │              basicauth/loki                                          │                 │
+ │              └──────────────────────────────────────────────────────────────────────┘                 │
+ │                                                                                                      │
+ │                         Traces Pipeline                                                              │
+ │ ┌─────────┐  ┌────────────────┐ ┌────────────────────┐ ┌───────────────┐ ┌───────┐ ┌──────────┐     │ ┌──────────────┐
+ │ │  otlp   │  │ memory_limiter │ │ filter/drop_noisy  │ │ k8sattributes │ │ batch │ │ resource │     │ │ otlp/traces  │
+ │ │gRPC:4317├──┤                ├─┤   _trace_urls      ├─┤               ├─┤       ├─┤          ├─────┼─┤  → Tempo     │
+ │ │HTTP:4318│  │                │ │                    │ │               │ │       │ │          │     │ │  (gRPC)      │
+ │ └────┬────┘  └────────────────┘ └────────────────────┘ └───────────────┘ └───────┘ └──────────┘     │ └──────────────┘
+ │      │                                                                                               │
+ │  R   │       Metrics Pipeline                                                                        │  E
+ │  e   │  ┌────────────────┐ ┌───────────────┐ ┌───────┐ ┌──────────┐ ┌─────────────────────────┐     │  x
+ │  c   ├──┤ memory_limiter ├─┤ k8sattributes ├─┤ batch ├─┤ resource ├─┤ transform/promote_node  ├─────┼─┐p
+ │  e   │  │                │ │               │ │       │ │          │ │        _name             │     │ │o
+ │  i   │  └────────────────┘ └───────────────┘ └───────┘ └──────────┘ └─────────────────────────┘     │ │r
+ │  v   │                                                                                               │ │t  ┌────────────────┐
+ │  e ┌─┴───────────┐                                                                                  │ │e  │otlphttp/metrics│
+ │  r │ kubeletstats├──────────────────────────────────────────────────────────────────────────────────┘ │ └──┤  → Mimir       │
+ │  s │ :10250, 60s │                                                                                   │    │  (HTTP)        │
+ │    └─────────────┘                                                                                   │    └────────────────┘
+ │                         Logs Pipeline                                                                │
+ │ ┌─────────┐  ┌────────────────┐ ┌───────────────┐ ┌───────┐ ┌──────────┐                            │ ┌────────────────┐
+ │ │ filelog  │  │ memory_limiter │ │ k8sattributes │ │ batch │ │ resource │                            │ │ otlphttp/logs  │
+ │ │/var/log/ ├──┤                ├─┤               ├─┤       ├─┤          ├────────────────────────────┼─┤  → Loki        │
+ │ │pods/**   │  │                │ │               │ │       │ │          │                            │ │  (HTTP)        │
+ │ └─────────┘  └────────────────┘ └───────────────┘ └───────┘ └──────────┘                            │ └────────────────┘
+ │                                                                                                      │
+ │                                          Processors                                                  │
+ └──────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### How extensions relate to pipelines
+### Extensions
 
-Extensions are **not** part of any pipeline — they don't process telemetry data. They provide supporting capabilities:
+The following extensions are operating on the Otel collector. They provide the following capabilities:
 
 | Extension | Role | Used by |
 |-----------|------|---------|
-| `health_check` | Exposes `:13133` for K8s probes | Collector pod liveness/readiness — no pipeline connection |
+| `health_check` | Exposes `:13133` for K8s probes | Collector pod liveness/readiness |
 | `basicauth/tempo` | Supplies Basic Auth credentials | `otlp/traces` exporter (via `auth.authenticator`) |
 | `basicauth/mimir` | Supplies Basic Auth credentials | `otlphttp/metrics` exporter (via `auth.authenticator`) |
 | `basicauth/loki` | Supplies Basic Auth credentials | `otlphttp/logs` exporter (via `auth.authenticator`) |
 
-The `basicauth/*` extensions are referenced by exporters through the `auth.authenticator` field. The collector loads them as extensions and the exporter delegates authentication to them. This keeps auth concerns separated from export logic.
+The `basicauth/*` extensions are referenced by exporters through the `auth.authenticator` field. The collector loads them as extensions and the exporter delegates authentication to them.
 
 ---
 
