@@ -1,140 +1,231 @@
-# OTel Collector Pipeline
+# OTel Collector Components and Pipelines
 
-How telemetry flows through the collector — from ingestion to export.
+Maps the olly-collector's OpenTelemetry Collector configuration to the four component categories defined by the [OTel Collector architecture](https://opentelemetry.io/docs/collector/).
 
-## Overview
+## Components Overview
 
-```text
-                  OTel Collector · DaemonSet · one per node
-┌──────────────────────────────────────────────────────────────┐
-│                                                               │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │                        extensions                        │ │
-│  │  health_check · basicauth/tempo · basicauth/mimir       │ │
-│  │  basicauth/loki                                         │ │
-│  └─────────────────────────────────────────────────────────┘ │
-│                                                               │
-│  ┌──────────────┐   ┌─────────────────┐   ┌───────────────┐ │
-│  │ receivers     │   │ processors      │   │ exporters     │ │
-│  │               │   │                 │   │               │ │
-│  │ otlp          │   │ memory_limiter  │   │ otlp/traces   │ │
-│  │ filelog       │──▶│ filter          │──▶│ otlphttp/     │ │
-│  │ kubeletstats  │   │ k8sattributes   │   │   metrics     │ │
-│  │               │   │ batch           │   │ otlphttp/logs │ │
-│  │               │   │ resource        │   │               │ │
-│  │               │   │ transform       │   │               │ │
-│  └──────────────┘   └─────────────────┘   └───────────────┘ │
-│                                                               │
-└──────────────────────────────────────────────────────────────┘
+An OTel Collector is built from four component types. Three of them (receivers, processors, exporters) form **pipelines**. The fourth (extensions) operates outside pipelines but can be referenced by pipeline components.
 
-Exports to Grafana Cloud:
-  otlp/traces      ──▶ Tempo  (gRPC)
-  otlphttp/metrics ──▶ Mimir  (HTTP)
-  otlphttp/logs    ──▶ Loki   (HTTP)
+```mermaid
+block-beta
+    columns 3
+
+    block:Receivers:1
+        columns 1
+        r_title["Receivers"]
+        r1["otlp\ngRPC :4317 / HTTP :4318"]
+        r2["filelog\n/var/log/pods/**/*.log"]
+        r3["kubeletstats\nhttps://${K8S_NODE_IP}:10250\n60s interval"]
+    end
+
+    block:Processors:1
+        columns 1
+        p_title["Processors"]
+        p1["memory_limiter"]
+        p2["filter/drop_noisy_trace_urls"]
+        p3["k8sattributes"]
+        p4["batch"]
+        p5["resource"]
+        p6["transform/promote_node_name"]
+    end
+
+    block:Exporters:1
+        columns 1
+        e_title["Exporters"]
+        e1["otlp/traces → Tempo\ngRPC"]
+        e2["otlphttp/metrics → Mimir"]
+        e3["otlphttp/logs → Loki"]
+        e4["debug\n(troubleshooting only)"]
+    end
+
+    block:Extensions:3
+        columns 1
+        ext_title["Extensions (outside pipelines)"]
+        ext1["health_check :13133 — K8s liveness/readiness probes"]
+        ext2["basicauth/tempo — credentials for otlp/traces exporter"]
+        ext3["basicauth/mimir — credentials for otlphttp/metrics exporter"]
+        ext4["basicauth/loki — credentials for otlphttp/logs exporter"]
+    end
+
+    style r_title fill:none,stroke:none
+    style p_title fill:none,stroke:none
+    style e_title fill:none,stroke:none
+    style ext_title fill:none,stroke:none
 ```
 
-Three pipelines (traces, metrics, logs) share the same collector instance but run independent receiver → processor → exporter chains.
+### How extensions relate to pipelines
 
-## Pipeline Detail
+Extensions are **not** part of any pipeline — they don't process telemetry data. They provide supporting capabilities:
 
-### Traces
+| Extension | Role | Used by |
+|-----------|------|---------|
+| `health_check` | Exposes `:13133` for K8s probes | Collector pod liveness/readiness — no pipeline connection |
+| `basicauth/tempo` | Supplies Basic Auth credentials | `otlp/traces` exporter (via `auth.authenticator`) |
+| `basicauth/mimir` | Supplies Basic Auth credentials | `otlphttp/metrics` exporter (via `auth.authenticator`) |
+| `basicauth/loki` | Supplies Basic Auth credentials | `otlphttp/logs` exporter (via `auth.authenticator`) |
+
+The `basicauth/*` extensions are referenced by exporters through the `auth.authenticator` field. The collector loads them as extensions and the exporter delegates authentication to them. This keeps auth concerns separated from export logic.
+
+---
+
+## Pipeline Diagrams
+
+Each pipeline defines which receivers feed data in, which processors transform it (in order), and which exporters send it out.
+
+### Traces Pipeline
+
+Includes `filter/drop_noisy_trace_urls` — the only pipeline with a filter processor.
 
 ```mermaid
 flowchart LR
-    R["otlp<br/>gRPC :4317 · HTTP :4318"]
-    ML[memory_limiter]
-    F["filter/<br/>drop_noisy_trace_urls"]
-    K[k8sattributes]
-    B[batch]
-    RS[resource]
-    EX["otlp/traces<br/>→ Tempo · gRPC"]
+    subgraph Receivers
+        gRPC["otlp gRPC\n:4317"]
+        HTTP["otlp HTTP\n:4318"]
+    end
 
-    R --> ML --> F --> K --> B --> RS --> EX
+    subgraph Processors
+        direction LR
+        T1["memory_limiter\n—\ncheck_interval: 1s\nlimit: 80%\nspike: 25%"]
+        T2["filter/drop_noisy_trace_urls\n—\nDrops: /healthz /readyz\n/metrics /prometheus\n/actuator/* /favicon.ico\n/internal/health/*\n/internal/status/*"]
+        T3["k8sattributes\n—\nExtracts: pod.name, pod.uid\ndeployment.name, namespace\nnode.name, container.name\n+ 5 more\nScoped to: KUBE_NODE_NAME"]
+        T4["batch\n—\nsize: 1000\ntimeout: 10s"]
+        T5["resource\n—\nInserts:\nk8s.cluster.name"]
+        T1 --> T2 --> T3 --> T4 --> T5
+    end
 
-    style F fill:#b71c1c,stroke:#e57373,color:#fff
+    subgraph Exporter
+        Tempo["otlp/traces\n→ Tempo (gRPC)\n—\nauth: basicauth/tempo\ntls: enabled\nkeepalive: 30s"]
+    end
+
+    gRPC & HTTP --> T1
+    T5 --> Tempo
+
+    style T2 fill:#fce4ec,stroke:#E91E63
+    style Tempo fill:#e8f5e9,stroke:#4CAF50
 ```
 
-Only pipeline with a filter — drops health-check and probe spans before enrichment.
+### Metrics Pipeline
 
-### Metrics
+No filter. Adds `kubeletstats` receiver and `transform/promote_node_name` processor.
 
 ```mermaid
 flowchart LR
-    R1["otlp<br/>gRPC :4317 · HTTP :4318"]
-    R2["kubeletstats<br/>60s · node/pod/container/volume"]
-    ML[memory_limiter]
-    K[k8sattributes]
-    B[batch]
-    RS[resource]
-    TR["transform/<br/>promote_node_name"]
-    EX["otlphttp/metrics<br/>→ Mimir · HTTP"]
+    subgraph Receivers
+        gRPC["otlp gRPC\n:4317"]
+        HTTP["otlp HTTP\n:4318"]
+        KS["kubeletstats\n—\n:10250 (serviceAccount)\n60s interval\ngroups: container,\npod, node, volume"]
+    end
 
-    R1 & R2 --> ML --> K --> B --> RS --> TR --> EX
+    subgraph Processors
+        direction LR
+        M1["memory_limiter\n(same config)"]
+        M2["k8sattributes\n(same config)"]
+        M3["batch\n(same config)"]
+        M4["resource\n(same config)"]
+        M5["transform/\npromote_node_name\n—\nCopies k8s.node.name\nfrom resource attr\nto datapoint attr\n(Mimir label)"]
+        M1 --> M2 --> M3 --> M4 --> M5
+    end
 
-    style TR fill:#0d47a1,stroke:#64b5f6,color:#fff
+    subgraph Exporter
+        Mimir["otlphttp/metrics\n→ Mimir\n—\nauth: basicauth/mimir\ntls: enabled\ncompression: gzip"]
+    end
+
+    gRPC & HTTP & KS --> M1
+    M5 --> Mimir
+
+    style KS fill:#e3f2fd,stroke:#1565C0
+    style M5 fill:#fff3e0,stroke:#EF6C00
+    style Mimir fill:#e8f5e9,stroke:#4CAF50
 ```
 
-Two receivers: application metrics via OTLP and infrastructure metrics from the kubelet stats API (node, pod, container, volume).
+### Logs Pipeline
 
-`transform/promote_node_name` copies `k8s.node.name` from resource attributes to datapoint attributes so Mimir exposes it as a Prometheus label.
-
-### Logs
+Uses `filelog` receiver instead of OTLP. Reads container logs directly from the node filesystem.
 
 ```mermaid
 flowchart LR
-    R["filelog<br/>/var/log/pods/**/*.log"]
-    ML[memory_limiter]
-    K[k8sattributes]
-    B[batch]
-    RS[resource]
-    EX["otlphttp/logs<br/>→ Loki · HTTP"]
+    subgraph Receiver
+        FL["filelog\n—\n/var/log/pods/**/*.log\nstart_at: end\noperator: container-parser"]
+    end
 
-    R --> ML --> K --> B --> RS --> EX
+    subgraph Processors
+        direction LR
+        L1["memory_limiter\n(same config)"]
+        L2["k8sattributes\n(same config)"]
+        L3["batch\n(same config)"]
+        L4["resource\n(same config)"]
+        L1 --> L2 --> L3 --> L4
+    end
+
+    subgraph Exporter
+        Loki["otlphttp/logs\n→ Loki\n—\nauth: basicauth/loki\ntls: enabled"]
+    end
+
+    FL --> L1
+    L4 --> Loki
+
+    style FL fill:#e3f2fd,stroke:#1565C0
+    style Loki fill:#e8f5e9,stroke:#4CAF50
 ```
 
-Reads container logs from the host filesystem. The filelog receiver parses CRI container format and starts at the end of each file (`start_at: end`).
-
-## Processor Order
-
-| Position | Processor | Why here |
-|----------|-----------|----------|
-| 1st | `memory_limiter` | Must be first — back-pressures before OOM (80% limit, 25% spike) |
-| 2nd (traces only) | `filter/drop_noisy_trace_urls` | Drop before enrichment — don't spend CPU on spans we'll discard |
-| next | `k8sattributes` | Enrich with pod, namespace, deployment metadata (scoped to local node via `KUBE_NODE_NAME`) |
-| next | `batch` | Group after enrichment — reduces export calls (1000 items or 10s window) |
-| next | `resource` | Insert `k8s.cluster.name` — identifies which cluster produced this telemetry |
-| last (metrics only) | `transform/promote_node_name` | Promote `k8s.node.name` to datapoint attribute — Mimir needs it as a Prometheus label for node-level dashboards |
-
-## Why Traces Have a Filter (and Metrics Don't)
-
-Health checks, readiness probes, and Prometheus scrapes generate constant high-frequency spans with zero diagnostic value:
-
-> 100 pods × 3 probes × 12 calls/min ≈ **3,600 throwaway spans/min**
-
-The filter uses OTTL to drop GET requests matching `/healthz`, `/readyz`, `/metrics`, `/actuator/*`, `/internal/health/*`, `/internal/status/*`, and `/favicon.ico`. It checks three HTTP attribute names (`http.route`, `http.target`, `url.path`) because different OTel SDK versions use different semantic conventions.
-
-`error_mode: ignore` is a safety net — if an attribute doesn't exist on a span, the OTTL expression errors rather than returning false. Ignoring the error means the span is kept (safe default: when in doubt, don't drop).
-
-Metrics don't need this filter. Metric cardinality is controlled at the SDK level (`OTEL_METRICS_EXPORTER=none` in the default Instrumentation CR) and at backend ingestion limits.
-
-## Extensions
-
-| Extension | Purpose |
-|-----------|---------|
-| `health_check` (:13133) | Kubernetes liveness/readiness probes for the collector pod |
-| `basicauth/tempo` | Authenticates trace exports to Grafana Cloud Tempo |
-| `basicauth/mimir` | Authenticates metric exports to Grafana Cloud Mimir |
-| `basicauth/loki` | Authenticates log exports to Grafana Cloud Loki |
-
-All `basicauth/*` credentials come from the `grafana-cloud-credentials` Secret, mounted as environment variables on the collector pods.
+---
 
 ## Self-Observability
 
-The collector exposes its own internal metrics at `:8888` (Prometheus pull):
+The collector exposes its own internal metrics for monitoring.
 
-| Metric | What it tells you |
-|--------|-------------------|
-| `otelcol_receiver_accepted_*` | Data points accepted per receiver and signal type |
-| `otelcol_exporter_sent_*` | Data points successfully exported |
-| `otelcol_processor_refused_*` | Data points dropped by processors |
-| `process_memory_rss` | Collector memory — compare against the `memory_limiter` threshold |
+```yaml
+service:
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: '0.0.0.0'
+                port: 8888
+```
+
+Prometheus scrapes `:8888/metrics` for collector health signals: `otelcol_receiver_accepted_spans`, `otelcol_exporter_sent_metric_points`, `otelcol_processor_refused_spans`, `process_runtime_total_alloc_bytes`, etc.
+
+This is configured through `service.telemetry`, not through a pipeline — it's the collector observing itself.
+
+---
+
+## Why Traces Have an Extra Processor
+
+The `filter/drop_noisy_trace_urls` processor only exists in the **traces** pipeline because:
+
+- Health checks (`/healthz`, `/readyz`) and Prometheus scrapes (`/metrics`) generate **constant high-frequency spans**
+- 100 pods x 3 probes x 12 calls/min = **3,600 spans/min** of zero-value data
+- These span names have **low cardinality** so they don't cause metric cardinality problems in the metrics pipeline
+
+The metrics pipeline has no equivalent filter — metric cardinality is controlled at the SDK level.
+
+## Processor Order Rationale
+
+| Position | Processor | Why Here |
+|----------|-----------|----------|
+| 1st | `memory_limiter` | Must be first — prevents OOM before any work is done |
+| 2nd (traces only) | `filter/drop_noisy_trace_urls` | Drop before enrichment — no point enriching spans we'll discard |
+| 2nd/3rd | `k8sattributes` | Enrich with K8s metadata before batching |
+| 3rd/4th | `batch` | Group after enrichment to reduce export calls |
+| 4th/5th | `resource` | Insert cluster name before export |
+| Last (metrics only) | `transform/promote_node_name` | Copy node name to datapoint attrs after resource processor sets it |
+
+## Filter OTTL Expressions Reference
+
+The filter uses OpenTelemetry Transformation Language (OTTL):
+
+```yaml
+filter/drop_noisy_trace_urls:
+  error_mode: ignore        # Don't fail pipeline on OTTL evaluation errors
+  traces:
+    span:
+      - |                   # Drop span if expression is TRUE
+        (attributes["http.method"] == "GET" or attributes["http.request.method"] == "GET") and (
+          attributes["http.route"] == "/favicon.ico"   or ...
+        )
+```
+
+`error_mode: ignore` is important — if an attribute doesn't exist, the expression returns an error rather than false. Ignoring means the span is kept (safe default).
