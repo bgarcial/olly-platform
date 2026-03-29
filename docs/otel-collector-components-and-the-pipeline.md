@@ -5,7 +5,7 @@ I want to start by correlating the Otel Collector configuration for this project
 ## Components Overview
 
 - The receivers, processors, and exporters are part of the  **Otel Collector pipelines**. 
-- The fourth, extensions, they are related to the collector but they are not part of any pipeline, thus they don't process any telemetry. They can be referenced by pipeline components.
+- The fourth, extensions, they are related to the collector but they are not part of any pipeline, thus they don't receive, process, or export spans, metrics, or logs or any telemetry. They can be referenced by pipeline components.
 
 ```
  olly-collector (OpenTelemetry Collector)
@@ -47,6 +47,15 @@ I want to start by correlating the Otel Collector configuration for this project
 ### Extensions
 
 The following extensions are operating on the Otel collector. They provide the following capabilities:
+
+#### `health_check` extension
+
+- It triggers like a **separate HTTP server** inside the collector that reports whether the collector process itself is healthy.
+- It exists so that other systems (Kubernetes, load balancers, monitoring) can ask: "is this collector instance working?"
+  - `200 OK`. Running and ready to handle signals.
+  - `503 Service Unavailable`. Not Ready. The collector is starting up, shutting down, or broken.
+- In Kubernetes, their endporints are into the pod's **liveness and readiness probes** so the kubelet can restart unhealthy
+collectors and remove unready ones from service.
 
 | Extension | Role | Used by |
 |-----------|------|---------|
